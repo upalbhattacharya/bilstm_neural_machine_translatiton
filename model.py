@@ -115,18 +115,20 @@ class EncoderLSTM(tf.keras.layers.Layer):
 
 
 class Attention(tf.keras.layers.Layer):
-    def __init__(self):
+    def __init__(self, prev_state_shape, enc_hidden_shape):
         super(Attention, self).__init__()
+        self.prev_state_shape = prev_state_shape
+        self.enc_hidden_shape = enc_hidden_shape
 
-    def build(self, prev_state_shape, enc_hidden_shape):
-        self.query_weight = self.add_weight("query_weight", shape=[int(
-            prev_state_shape[-1]), int(prev_state_shape[-1])], initializer='glorot_normal')
+    def build(self, input_shape):
+        self.query_weight = self.add_weight("query_weight", shape=[
+                                            self.prev_state_shape[-1], self.prev_state_shape[-1]], initializer='glorot_normal')
 
-        self.values_weight = self.add_weight("values_weight", shape=[int(
-            enc_hidden_shape[-1]), int(prev_state_shape[-1])], initializer='glorot_normal')
+        self.values_weight = self.add_weight("values_weight", shape=[
+                                             self.enc_hidden_shape[-1], self.prev_state_shape[-1]], initializer='glorot_normal')
 
-        self.add_weight = self.add_weight("add_weight", shape=[int(
-            prev_state_shape[-1]), 1], initializer='glorot_normal')
+        self.add_weight = self.add_weight(
+            "add_weight", shape=[self.prev_state_shape[-1], 1], initializer='glorot_normal')
 
     def call(self, prev_state, hidden):
         batch_size = hidden.shape[0]
@@ -149,11 +151,12 @@ class Attention(tf.keras.layers.Layer):
 
 class DecoderLSTM(tf.keras.layers.Layer):
 
-    def __init__(self, batch_size, units, output_dim, **kwargs):
+    def __init__(self, batch_size, units, output_dim, encoder_units, **kwargs):
         super(DecoderLSTM, self).__init__()
         self.units = units
         self.batch_size = batch_size
         self.output_dim = output_dim
+        self.encoder_units = encoder_units
 
     def build(self, input_shape):
         """
@@ -192,7 +195,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
             "forget_bias", shape=[1, self.units], initializer='Zeros')
 
         self.forget_context_weight = self.add_weight("forget_context_weight",
-                                                     shape=[self.units, self.units], initializer='glorot_normal')
+                                                     shape=[self.encoder_units, self.units], initializer='glorot_normal')
 
         # External Input gate
         self.extinput_input_weight = self.add_weight("extinput_input_weight",
@@ -203,7 +206,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
             "extinput_bias", shape=[1, self.units], initializer='Zeros')
 
         self.extinput_context_weight = self.add_weight("extinput_context_weight",
-                                                       shape=[self.units, self.units], initializer='glorot_normal')
+                                                       shape=[self.encoder_units, self.units], initializer='glorot_normal')
 
         # Output control gate
         self.output_input_weight = self.add_weight("output_input_weight",
@@ -214,7 +217,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
             "output_bias", shape=[1, self.units], initializer='Zeros')
 
         self.output_context_weight = self.add_weight("output_context_weight",
-                                                     shape=[self.units, self.units], initializer='glorot_normal')
+                                                     shape=[self.encoder_units, self.units], initializer='glorot_normal')
 
         # Immemdiate state
         self.imm_state_input_weight = self.add_weight("imm_state_input_weight",
@@ -225,7 +228,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
             "imm_state_bias", shape=[1, self.units], initializer='Zeros')
 
         self.imm_state_context_weight = self.add_weight("imm_state_context_weight",
-                                                        shape=[self.units, self.units], initializer='glorot_normal')
+                                                        shape=[self.encoder_units, self.units], initializer='glorot_normal')
 
         # Prediction weights
         self.pred_weight = self.add_weight("pred_weight",
@@ -238,37 +241,37 @@ class DecoderLSTM(tf.keras.layers.Layer):
             tf.zeros([self.batch_size, self.units]), trainable=False)
         state = tf.Variable(
             tf.zeros([self.batch_size, self.units]), trainable=False)
-        output = initial_y
+        output = tf.squeeze(initial_y)
         output_states = []
+        i = 0
+        while(i != 30):  # token !=STOP probably
 
-        while():  # token !=STOP probably
-
-            attention = Attention()
-            attention.build(prev_state_shape=output.shape,
-                            enc_hidden_shape=enc_hidden_states.shape)
+            attention = Attention(prev_state_shape=initial_y.shape,
+                                  enc_hidden_shape=enc_hidden_states.shape)
             context = attention(prev_state=output, hidden=enc_hidden_states)
+            context = tf.squeeze(context)
 
             forget_gate = tf.matmul(output, self.forget_input_weight) + \
                 tf.matmul(hidden, self.forget_hidden_weight) + \
-                tf.tile(tf.matmul(context, self.forget_context_weight), [self.batch_size, 1]) + \
+                tf.matmul(context, self.forget_context_weight) + \
                 tf.tile(self.forget_bias, [self.batch_size, 1])
             forget_gate = tf.math.sigmoid(forget_gate)
 
             extinput_gate = tf.matmul(output, self.extinput_input_weight) + \
                 tf.matmul(hidden, self.extinput_hidden_weight) + \
-                tf.tile(tf.matmul(context, self.extinput_context_weight), [self.batch_size, 1]) + \
+                tf.matmul(context, self.extinput_context_weight) + \
                 tf.tile(self.extinput_bias, [self.batch_size, 1])
             extinput_gate = tf.math.sigmoid(extinput_gate)
 
             output_gate = tf.matmul(output, self.output_input_weight) + \
                 tf.matmul(hidden, self.output_hidden_weight) + \
-                tf.tile(tf.matmul(context, self.output_context_weight), [self.batch_size, 1]) + \
+                tf.matmul(context, self.output_context_weight) + \
                 tf.tile(self.output_bias, [self.batch_size, 1])
             output_gate = tf.math.sigmoid(output_gate)
 
             imm_state_gate = tf.matmul(output, self.imm_state_input_weight) + \
                 tf.matmul(hidden, self.imm_state_hidden_weight) + \
-                tf.tile(tf.matmul(context, self.forget_context_weight), [self.batch_size, 1]) + \
+                tf.matmul(context, self.forget_context_weight) + \
                 tf.tile(self.imm_state_bias, [self.batch_size, 1])
             imm_state_gate = tf.math.sigmoid(imm_state_gate)
 
@@ -277,8 +280,10 @@ class DecoderLSTM(tf.keras.layers.Layer):
 
             hidden = tf.multiply(tf.math.tanh(state), output_gate)
 
-            output = tf.multiply(hidden, self.pred_weight) + self.pred_bias
+            output = tf.matmul(hidden, self.pred_weight) + self.pred_bias
             output = tf.nn.softmax(output)
+            # i = i+1 # For testing
+            # tf.print(output) # For testing
             output_states.append(output)
 
         return tf.stack(output_states, axis=1)
@@ -298,11 +303,11 @@ class BiLSTMModel(tf.keras.Model):
         self.backward_encoder = EncoderLSTM(
             batch_size=self.batch_size, units=self.encoder_units)
         self.decoder = DecoderLSTM(
-            batch_size=self.batch_size, units=self.decoder_units, output_dim=self.output_dim)
+            batch_size=self.batch_size, units=self.decoder_units, output_dim=self.output_dim, encoder_units=2*self.encoder_units)
 
     def call(self, X, initial_y):
         forward_hidden_states = self.forward_encoder(X)
-        backward_hidden_states = self.backward_encoder(tf.reverse(X, axis=1))
+        backward_hidden_states = self.backward_encoder(tf.reverse(X, axis=[1]))
 
         enc_hidden_states = tf.concat(
             [forward_hidden_states, backward_hidden_states], -1)
