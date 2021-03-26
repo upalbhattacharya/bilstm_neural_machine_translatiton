@@ -115,27 +115,28 @@ class EncoderLSTM(tf.keras.layers.Layer):
 
 
 class Attention(tf.keras.layers.Layer):
-    def __init__(self, prev_state_shape, enc_hidden_shape):
+    def __init__(self, prev_state_shape, enc_hidden_shape, units):
         super(Attention, self).__init__()
+        self.units = units
         self.prev_state_shape = prev_state_shape
         self.enc_hidden_shape = enc_hidden_shape
 
     def build(self, input_shape):
         self.query_weight = self.add_weight("query_weight", shape=[
-                                            self.prev_state_shape[-1], self.prev_state_shape[-1]], initializer='glorot_normal')
+                                            self.prev_state_shape[-1], self.units], initializer='glorot_normal')
 
         self.values_weight = self.add_weight("values_weight", shape=[
-                                             self.enc_hidden_shape[-1], self.prev_state_shape[-1]], initializer='glorot_normal')
+                                             self.enc_hidden_shape[-1], self.units], initializer='glorot_normal')
 
         self.add_weight = self.add_weight(
-            "add_weight", shape=[self.prev_state_shape[-1], 1], initializer='glorot_normal')
+            "add_weight", shape=[self.units, 1], initializer='glorot_normal')
 
-    def call(self, prev_state, hidden):
-        batch_size = hidden.shape[0]
-        seq_len = hidden.shape[1]
-        units = hidden.shape[-1]
+    def call(self, prev_state, enc_hidden):
+        batch_size = enc_hidden.shape[0]
+        seq_len = enc_hidden.shape[1]
+        enc_units = enc_hidden.shape[-1]
 
-        align = tf.matmul(hidden, tf.tile(tf.expand_dims(
+        align = tf.matmul(enc_hidden, tf.tile(tf.expand_dims(
             self.values_weight, 0), [batch_size, 1, 1]))
         align += tf.tile(tf.expand_dims(tf.matmul(prev_state,
                                                   self.query_weight), 1), [1, seq_len, 1])
@@ -144,19 +145,20 @@ class Attention(tf.keras.layers.Layer):
             self.add_weight, 0), [batch_size, 1, 1]))
         alpha = tf.nn.softmax(align, axis=1)
         context = tf.reduce_sum(tf.multiply(
-            tf.tile(alpha, [1, 1, units]), hidden), axis=1, keepdims=True)
+            tf.tile(alpha, [1, 1, enc_units]), enc_hidden), axis=1, keepdims=True)
 
         return context
 
 
 class DecoderLSTM(tf.keras.layers.Layer):
 
-    def __init__(self, batch_size, units, output_dim, encoder_units, **kwargs):
+    def __init__(self, batch_size, units, output_dim, encoder_units, attn_units, **kwargs):
         super(DecoderLSTM, self).__init__()
         self.units = units
         self.batch_size = batch_size
         self.output_dim = output_dim
         self.encoder_units = encoder_units
+        self.attn_units = attn_units
 
     def build(self, input_shape):
         """
@@ -247,8 +249,9 @@ class DecoderLSTM(tf.keras.layers.Layer):
         while(i != 30):  # token !=STOP probably
 
             attention = Attention(prev_state_shape=initial_y.shape,
-                                  enc_hidden_shape=enc_hidden_states.shape)
-            context = attention(prev_state=output, hidden=enc_hidden_states)
+                                  enc_hidden_shape=enc_hidden_states.shape, units=self.attn_units)
+            context = attention(prev_state=output,
+                                enc_hidden=enc_hidden_states)
             context = tf.squeeze(context)
 
             forget_gate = tf.matmul(output, self.forget_input_weight) + \
@@ -291,19 +294,20 @@ class DecoderLSTM(tf.keras.layers.Layer):
 
 class BiLSTMModel(tf.keras.Model):
 
-    def __init__(self, batch_size, encoder_units, decoder_units, output_dim, **kwargs):
+    def __init__(self, batch_size, encoder_units, decoder_units, attn_units, output_dim, **kwargs):
         super(BiLSTMModel, self).__init__()
         self.batch_size = batch_size
         self.encoder_units = encoder_units
         self.decoder_units = decoder_units
         self.output_dim = output_dim
+        self.attn_units = attn_units
 
         self.forward_encoder = EncoderLSTM(
             batch_size=self.batch_size, units=self.encoder_units)
         self.backward_encoder = EncoderLSTM(
             batch_size=self.batch_size, units=self.encoder_units)
         self.decoder = DecoderLSTM(
-            batch_size=self.batch_size, units=self.decoder_units, output_dim=self.output_dim, encoder_units=2*self.encoder_units)
+            batch_size=self.batch_size, units=self.decoder_units, output_dim=self.output_dim, encoder_units=2*self.encoder_units, attn_units=self.attn_units)
 
     def call(self, X, initial_y):
         forward_hidden_states = self.forward_encoder(X)
