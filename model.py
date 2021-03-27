@@ -75,6 +75,7 @@ class EncoderLSTM(tf.keras.layers.Layer):
             "imm_state_bias", shape=[1, self.units], initializer='Zeros')
 
     def call(self, inputs):
+        # To get a list containing the input vectors at each time point
         time_steps = tf.unstack(inputs, axis=1)
         hidden = tf.Variable(
             tf.zeros([self.batch_size, self.units]), trainable=False)
@@ -111,6 +112,7 @@ class EncoderLSTM(tf.keras.layers.Layer):
 
             hidden_states.append(hidden)
 
+        # To return a 3D tensor of shape [batch_size, seq_len, units]
         return tf.stack(hidden_states, axis=1)
 
 
@@ -135,7 +137,7 @@ class Attention(tf.keras.layers.Layer):
         batch_size = enc_hidden.shape[0]
         seq_len = enc_hidden.shape[1]
         enc_units = enc_hidden.shape[-1]
-
+        # Calculates the alignment of a particular decoder state with all the encoder hidden states
         align = tf.matmul(enc_hidden, tf.tile(tf.expand_dims(
             self.values_weight, 0), [batch_size, 1, 1]))
         align += tf.tile(tf.expand_dims(tf.matmul(prev_state,
@@ -252,7 +254,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
                                   enc_hidden_shape=enc_hidden_states.shape, units=self.attn_units)
             context = attention(prev_state=output,
                                 enc_hidden=enc_hidden_states)
-            context = tf.squeeze(context)
+            context = tf.squeeze(context)  # Squeezed to become a 2D tensor
 
             forget_gate = tf.matmul(output, self.forget_input_weight) + \
                 tf.matmul(hidden, self.forget_hidden_weight) + \
@@ -289,6 +291,7 @@ class DecoderLSTM(tf.keras.layers.Layer):
             # tf.print(output) # For testing
             output_states.append(output)
 
+        # To return a 3D tensor of shape [batch_size, output_seq_len, output_dim]
         return tf.stack(output_states, axis=1)
 
 
